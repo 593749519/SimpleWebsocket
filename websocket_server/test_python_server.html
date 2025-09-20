@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python WebSocket Server Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            margin: 5px;
+        }
+        .controls {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Python WebSocket Server Test</h1>
+        <p>Testing connection to Python WebSocket server on port 9001</p>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button id="pingBtn" onclick="sendPing()" disabled>Send Ping</button>
+            <button id="clearBtn" onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="messageInput" placeholder="Enter message to send..." onkeypress="handleKeyPress(event)">
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 3;
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.getElementById('log');
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<span style="color: #666;">[${timestamp}]</span> <span style="color: ${getColor(type)};">${message}</span>`;
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function getColor(type) {
+            switch(type) {
+                case 'error': return '#dc3545';
+                case 'success': return '#28a745';
+                case 'warning': return '#ffc107';
+                default: return '#000';
+            }
+        }
+        
+        function updateStatus(status, className) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = status;
+            statusDiv.className = `status ${className}`;
+        }
+        
+        function updateButtons(connected) {
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('pingBtn').disabled = !connected;
+            document.getElementById('sendBtn').disabled = !connected;
+            document.getElementById('messageInput').disabled = !connected;
+        }
+        
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('Already connected', 'warning');
+                return;
+            }
+            
+            log('Connecting to ws://localhost:9001...', 'info');
+            updateStatus('Connecting...', 'connecting');
+            
+            try {
+                ws = new WebSocket('ws://localhost:9001');
+                
+                ws.onopen = function(event) {
+                    log('✅ WebSocket connection established successfully!', 'success');
+                    updateStatus('Connected', 'connected');
+                    updateButtons(true);
+                    reconnectAttempts = 0;
+                };
+                
+                ws.onmessage = function(event) {
+                    log(`📨 Received: ${event.data}`, 'success');
+                };
+                
+                ws.onclose = function(event) {
+                    log(`🔴 Connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason'}`, 'error');
+                    log(`Clean close: ${event.wasClean}`, 'info');
+                    updateStatus('Disconnected', 'disconnected');
+                    updateButtons(false);
+                    
+                    if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        log(`Attempting to reconnect... (${reconnectAttempts}/${maxReconnectAttempts})`, 'warning');
+                        setTimeout(connect, 2000);
+                    }
+                };
+                
+                ws.onerror = function(event) {
+                    log('❌ WebSocket error occurred', 'error');
+                    log(`Error details: ${JSON.stringify(event)}`, 'error');
+                    log(`Error type: ${typeof event}`, 'info');
+                };
+                
+            } catch (error) {
+                log(`❌ Failed to create WebSocket: ${error.message}`, 'error');
+                updateStatus('Connection Failed', 'disconnected');
+                updateButtons(false);
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                log('Disconnecting...', 'info');
+                ws.close(1000, 'User requested disconnect');
+                ws = null;
+            }
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) {
+                log('Please enter a message', 'warning');
+                return;
+            }
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+                log(`📤 Sent: ${message}`, 'info');
+                input.value = '';
+            } else {
+                log('Not connected', 'error');
+            }
+        }
+        
+        function sendPing() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send('PING');
+                log('📤 Sent: PING', 'info');
+            } else {
+                log('Not connected', 'error');
+            }
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.onload = function() {
+            log('Page loaded, ready to test Python WebSocket server', 'info');
+        };
+    </script>
+</body>
+</html>
